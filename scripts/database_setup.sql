@@ -1,0 +1,81 @@
+-- Criar banco de dados se não existir
+CREATE DATABASE IF NOT EXISTS db_pnatrans;
+USE db_pnatrans;
+
+-- Tabela: ranking_uf
+CREATE TABLE IF NOT EXISTS ranking_uf (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    UF VARCHAR(2) UNIQUE NOT NULL,
+    Total INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_uf (UF)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tabela: orgaos_completo
+CREATE TABLE IF NOT EXISTS orgaos_completo (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    NOME VARCHAR(255),
+    UF VARCHAR(2),
+    MUNICIPIO VARCHAR(100),
+    ESFERA_LIMPA VARCHAR(50),
+    STATUS VARCHAR(50),
+    ENVIOU_PRODUTO VARCHAR(3),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_uf (UF),
+    INDEX idx_esfera (ESFERA_LIMPA),
+    INDEX idx_enviou (ENVIOU_PRODUTO)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tabela: stats_produtos
+CREATE TABLE IF NOT EXISTS stats_produtos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    Nome_Produto VARCHAR(255),
+    Quantidade INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_produto (Nome_Produto)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tabela: stats_status_uf
+CREATE TABLE IF NOT EXISTS stats_status_uf (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    UF VARCHAR(2) NOT NULL,
+    Status_Limpo VARCHAR(50) NOT NULL,
+    Quantidade INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_uf (UF),
+    INDEX idx_status (Status_Limpo)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tabela: usuarios
+CREATE TABLE IF NOT EXISTS usuarios (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    NOME VARCHAR(255),
+    ORGAO VARCHAR(255),
+    UF VARCHAR(2),
+    PERFIL VARCHAR(100),
+    EMAIL VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_uf (UF),
+    INDEX idx_orgao (ORGAO),
+    INDEX idx_perfil (PERFIL)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tabela: acidentes_prf (PRINCIPAL)
+CREATE TABLE IF NOT EXISTS acidentes_prf (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ANO INT NOT NULL,
+    MES INT,
+    REGIAO VARCHAR(100),
+    UF VARCHAR(2),
+    TIPO_ACIDENTE VARCHAR(150),
+    FERIDOS INT DEFAULT 0,
+    MORTOS INT DEFAULT 0,
+    DESCRICAO LONGTEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_ano (ANO),
+    INDEX idx_uf (UF),
+    INDEX idx_regiao (REGIAO),
+    INDEX idx_tipo (TIPO_ACIDENTE)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

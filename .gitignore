@@ -1,0 +1,25 @@
+# --- Arquivos de Configuração e Segredos (CRÍTICO) ---
+.env
+.env.local
+
+# --- Arquivos de Dados (Para não pesar o repositório) ---
+*.csv
+*.xlsx
+*.xls
+*.json
+Planilhas/
+
+# --- Python - Arquivos compilados e cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Ambientes Virtuais (Virtual Envs) ---
+venv/
+.venv/
+env/
+
+# --- IDEs e Editores (Opcional) ---
+.vscode/
+.idea/
+.DS_Store
