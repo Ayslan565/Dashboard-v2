@@ -1,9 +1,9 @@
 import streamlit as st
 import os
 from PIL import Image
-# Importa as views (páginas) - usuarios removido pois foi integrado
+# Importa as views
 from views import produtos, prf, obitos 
-# Importa as funções de carregamento
+# Importa as funções de carregamento (Versão Original Estável)
 from utils import carregar_dados_gerais, carregar_dados_prf, carregar_dados_obitos, get_tema_config
 
 # 1. Configuração da Página
@@ -40,14 +40,13 @@ pagina = st.sidebar.radio(
     [
         "📊 Painel PNATRANS", 
         "📈 Análise Temporal", 
-        # "👥 Rede de Colaboradores",  <-- REMOVIDO (Integrado ao Painel)
         "🚗 Sinistros PRF", 
         "🏥 Óbitos (DATASUS)"
     ],
     label_visibility="collapsed"
 )
 
-# 3. CSS Otimizado (MANTIDO EXATAMENTE COMO SOLICITADO)
+# 3. CSS Otimizado (ESTILOS RESTAURADOS)
 st.markdown(f"""
     <style>
         /* Fundo e Texto Global */
@@ -60,7 +59,7 @@ st.markdown(f"""
             color: #FFFFFF !important;
         }}
 
-        /* --- BOTÕES DE NAVEGAÇÃO (Full Width) --- */
+        /* --- BOTÕES DE NAVEGAÇÃO (Full Width - Estilo Botão) --- */
         [data-testid="stSidebar"] .stRadio {{ width: 100% !important; }}
         [data-testid="stSidebar"] .stRadio > div {{ width: 100% !important; }}
         [data-testid="stSidebar"] div[role="radiogroup"] {{ width: 100% !important; }}
@@ -87,7 +86,7 @@ st.markdown(f"""
             width: 100%;
         }}
 
-        /* Hover */
+        /* Hover no botão do menu */
         [data-testid="stSidebar"] div[role="radiogroup"] > label:hover {{
             background-color: {cfg['border_color']} !important;
             border-color: #FFFFFF !important;
@@ -106,7 +105,7 @@ st.markdown(f"""
             background-color: {cfg['bg_card']}; 
             border: {cfg['border_width']} solid {cfg['border_color']};
             border-radius: 8px; padding: 15px; text-align: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }}
         .card-title {{ color: {cfg['text_color']}; font-weight: bold; opacity: 0.9; font-size: 0.9rem; text-transform: uppercase; }}
         .card-value {{ color: {cfg['text_color']}; font-weight: 800; font-size: 1.8rem; margin: 5px 0; }}
@@ -134,13 +133,13 @@ st.divider()
 
 # 6. Roteamento de Páginas
 if pagina == "📊 Painel PNATRANS":
-    # Aqui passamos o df_users para ser renderizado dentro do painel principal
     produtos.render_visao_geral(df_mapa, df_org, df_prod, df_status, cfg, df_mun, df_users)
 
 elif pagina == "📈 Análise Temporal":
     produtos.render_analise_temporal(df_raw, cfg)
 
 elif pagina == "🚗 Sinistros PRF":
+    # Carregamento TOTAL aqui (Método original que garante os dados)
     df_prf = carregar_dados_prf()
     prf.render_prf(df_prf, cfg)
 

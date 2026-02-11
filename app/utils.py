@@ -6,7 +6,7 @@ import json
 from sqlalchemy import create_engine
 from urllib.request import urlopen
 
-# --- CONFIGURAÇÃO DE TEMA (CLARO/ESCURO) ---
+# --- CONFIGURAÇÃO DE TEMA ---
 def get_tema_config(tema_selecionado):
     if tema_selecionado == "Escuro":
         return {
@@ -21,7 +21,7 @@ def get_tema_config(tema_selecionado):
             "bg_app": "#F5F7FA", "sidebar_bg": "#1E2A38", "grid_color": "#EEEEEE", "border_width": "2px"
         }
 
-# --- HELPERS (Funções Auxiliares) ---
+# --- HELPERS ---
 def limpar_coordenadas(valor):
     try:
         if pd.isna(valor) or valor == '': return None
@@ -62,7 +62,7 @@ def padronizar_grafico(fig, tema):
     fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor=tema['grid_color'])
     return fig
 
-# --- CARREGAMENTO 1: DADOS GERAIS (GESTÃO) ---
+# --- CARREGAMENTO GERAL ---
 @st.cache_data(ttl=3600)
 def carregar_dados_gerais():
     try:
@@ -90,25 +90,26 @@ def carregar_dados_gerais():
     except Exception as e:
         return (pd.DataFrame(),)*7
 
-# --- CARREGAMENTO 2: PRF (ACIDENTES COMPLETOS) ---
+# --- CARREGAMENTO PRF (COMPLETO) ---
 @st.cache_data(ttl=3600, show_spinner="Carregando base PRF completa...")
 def carregar_dados_prf():
     try:
         engine = create_engine('mysql+pymysql://root:Jjjb3509@127.0.0.1:3306/db_pnatrans')
         with engine.connect() as conn:
-            # Tenta carregar colunas específicas ou tudo se falhar
+            # Lista explícita de colunas para garantir que MARCA e TIPO_VEICULO venham
+            cols = """
+                ID, PESID, DATA_INVERSA, DIA_SEMANA, HORARIO, UF, BR, KM, MUNICIPIO,
+                CAUSA_PRINCIPAL, TIPO_ACIDENTE, CLASSIFICACAO_ACIDENTE, FASE_DIA,
+                SENTIDO_VIA, CONDICAO_METEREOLOGICA, TIPO_PISTA, TRACADO_VIA, USO_SOLO,
+                ID_VEICULO, TIPO_VEICULO, MARCA, ANO_FABRICACAO_VEICULO, TIPO_ENVOLVIDO,
+                ESTADO_FISICO, IDADE, SEXO,
+                ILESOS, FERIDOS_LEVES, FERIDOS_GRAVES, MORTOS, FERIDOS,
+                LATITUDE, LONGITUDE, REGIONAL, DELEGACIA, UOP, ANO, MES
+            """
             try:
-                cols = """
-                    ID, PESID, DATA_INVERSA, DIA_SEMANA, HORARIO, UF, BR, KM, MUNICIPIO,
-                    CAUSA_PRINCIPAL, TIPO_ACIDENTE, CLASSIFICACAO_ACIDENTE, FASE_DIA,
-                    SENTIDO_VIA, CONDICAO_METEREOLOGICA, TIPO_PISTA, TRACADO_VIA, USO_SOLO,
-                    ID_VEICULO, TIPO_VEICULO, MARCA, ANO_FABRICACAO_VEICULO, TIPO_ENVOLVIDO,
-                    ESTADO_FISICO, IDADE, SEXO,
-                    ILESOS, FERIDOS_LEVES, FERIDOS_GRAVES, MORTOS, FERIDOS,
-                    LATITUDE, LONGITUDE, REGIONAL, DELEGACIA, UOP, ANO, MES
-                """
                 df = pd.read_sql(f"SELECT {cols} FROM acidentes_prf", conn)
             except:
+                # Fallback se der erro nas colunas
                 df = pd.read_sql("SELECT * FROM acidentes_prf", conn)
             
             if not df.empty:
@@ -126,41 +127,14 @@ def carregar_dados_prf():
         st.error(f"Erro ao carregar PRF: {e}")
         return pd.DataFrame()
 
-# --- CARREGAMENTO 3: ÓBITOS (A FUNÇÃO QUE FALTAVA) ---
+# --- CARREGAMENTO OBITOS ---
 @st.cache_data(ttl=3600, show_spinner="Carregando dados de Óbitos (SIM)...")
 def carregar_dados_obitos():
     try:
         engine = create_engine('mysql+pymysql://root:Jjjb3509@127.0.0.1:3306/db_pnatrans')
         with engine.connect() as conn:
-            df = pd.read_sql("SELECT * FROM obitos_transporte", conn)
-            
-            if df.empty:
-                return df
-            
-            # Converte colunas numéricas para tipo correto
-            cols_int = ['ano_uid', 'local_uid', 'indicador_uid', 'categoria_uid', 
-                       'estatistica_uid', 'lococor_uid', 'atestante_uid', 'grupoetario_uid',
-                       'racacor_uid', 'sexo_uid', 'abrangencia_uid', 'localidade_uid',
-                       'janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho',
-                       'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro', 'total_anual']
-            
-            for col in cols_int:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-            
-            # Preenche valores nulos em colunas texto
-            cols_str = ['ano_nome', 'local_nome', 'indicador_nome', 'categoria_nome',
-                       'estatistica_nome', 'lococor_nome', 'atestante_nome', 'grupoetario_nome',
-                       'racacor_nome', 'sexo_nome', 'abrangencia_nome', 'localidade_nome']
-            
-            for col in cols_str:
-                if col in df.columns:
-                    df[col] = df[col].fillna('NÃO INFORMADO').astype(str)
-            
-            return df
-    except Exception as e:
-        print(f"Erro ao carregar óbitos: {e}")
-        return pd.DataFrame()
+            return pd.read_sql("SELECT * FROM obitos_transporte", conn)
+    except: return pd.DataFrame()
 
 @st.cache_data
 def carregar_geojson():
