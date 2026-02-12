@@ -8,7 +8,7 @@ load_dotenv()
 DB_HOST = os.getenv('DB_HOST', '127.0.0.1')
 DB_PORT = os.getenv('DB_PORT', '3306')
 DB_USER = os.getenv('DB_USER', 'root')
-DB_PASSWORD = os.getenv('DB_PASSWORD', 'root')
+DB_PASSWORD = os.getenv('DB_PASSWORD', 'Jjjb3509')
 DB_NAME = os.getenv('DB_NAME', 'db_pnatrans')
 
 # String de conexão
