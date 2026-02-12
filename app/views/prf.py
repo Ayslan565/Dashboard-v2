@@ -18,14 +18,12 @@ def render_prf(df, tema):
     anos = sorted(df['ANO'].unique(), reverse=True)
     sel_anos = st.sidebar.multiselect("📅 Ano:", anos, default=[anos[0]] if anos else [])
     
-    # 2. Métrica de Visualização (SELETOR DE CORES/TIPO)
-    # Aqui definimos as opções exatas que aparecem no filtro
-    tipo_metrica = st.sidebar.radio("📊 Métrica dos Rankings:", ["Absoluto", "Taxa por 1.000 hab"])
+    # 2. Métrica de Visualização (MOVIDO PARA CÁ)
+    tipo_metrica = st.sidebar.radio("📊 Métrica dos Rankings:", ["Absoluto (Total)", "Taxa (por 1.000 hab.)"])
 
     # 3. Estado Físico
     if 'ESTADO_FISICO' in df.columns:
-        lista_fisico = [str(x) for x in df['ESTADO_FISICO'].unique() if pd.notna(x) and str(x).lower() != 'nan']
-        opcoes_fisico = sorted(lista_fisico)
+        opcoes_fisico = sorted([x for x in df['ESTADO_FISICO'].astype(str).unique() if x != 'nan'])
         sel_fisico = st.sidebar.multiselect("🏥 Estado Físico (Vítima):", opcoes_fisico, placeholder="Todos (Padrão)")
     else:
         sel_fisico = []
@@ -135,25 +133,16 @@ def render_prf(df, tema):
             with t_pesado: plot_ranking(df_fatal, 'CAMINH|TRATOR', 'Oranges')
             with t_bus: plot_ranking(df_fatal, 'ONIBUS|MICRO', 'Greens')
 
-    # ABA 3: LOCALIZAÇÃO & TAXAS (CORES CORRIGIDAS)
+    # ABA 3: LOCALIZAÇÃO & TAXAS (REORGANIZADO - UM ABAIXO DO OUTRO)
     with tabs[2]:
-        # --- LÓGICA DE CORES ---
-        # Se for Absoluto -> AZUL
-        # Se for Taxa -> VERMELHO
-        if tipo_metrica == "Absoluto":
-            cor_ranking = 'Blues'
-        else:
-            cor_ranking = 'Reds'
-
-        # Carregamento de População
+        # Carregamento de População (Controlado pelo filtro lateral)
         df_pop = pd.DataFrame()
-        if tipo_metrica == "Taxa por 1.000 hab":
+        if tipo_metrica == "Taxa (por 1.000 hab.)":
             from utils import carregar_populacao
             df_pop = carregar_populacao()
             if df_pop.empty:
-                st.warning("⚠️ Dados de população não disponíveis. Mostrando Absoluto.")
-                tipo_metrica = "Absoluto"
-                cor_ranking = 'Blues' # Fallback para azul
+                st.warning("⚠️ Dados de população não disponíveis no banco.")
+                tipo_metrica = "Absoluto (Total)"
 
         # 1. Gráfico Empilhado (Estados x Veículos)
         st.markdown("##### 🚗 Composição da Frota Acidentada por UF")
@@ -170,47 +159,39 @@ def render_prf(df, tema):
 
         st.divider()
         
-        # --- RANKING DE ESTADOS (COR CONDICIONAL) ---
+        # --- RANKING DE ESTADOS (GRANDE / FULL WIDTH) ---
         st.markdown(f"### 🗺️ Ranking por Estado ({tipo_metrica})")
         df_uf = df_f['UF'].value_counts().reset_index(name='Qtd').rename(columns={'index':'UF'})
         
-        if tipo_metrica == "Taxa por 1.000 hab" and not df_pop.empty:
+        if tipo_metrica == "Taxa (por 1.000 hab.)" and not df_pop.empty:
             pop_uf = df_pop.groupby('uf_norm')['populacao'].sum().reset_index()
             df_m = pd.merge(df_uf, pop_uf, left_on='UF', right_on='uf_norm')
             df_m['Valor'] = (df_m['Qtd'] / df_m['populacao']) * 1000
-            
-            # TAXA = VERMELHO ('Reds')
-            fig = px.bar(df_m.sort_values('Valor', ascending=False).head(30), x='Valor', y='UF', orientation='h', 
-                         text_auto='.2f', color='Valor', color_continuous_scale=cor_ranking, height=700)
+            # Altura ajustada para caber todos os estados
+            fig = px.bar(df_m.sort_values('Valor', ascending=False).head(30), x='Valor', y='UF', orientation='h', text_auto='.2f', color='Valor', height=700)
         else:
-            # ABSOLUTO = AZUL ('Blues')
-            fig = px.bar(df_uf.head(30), x='Qtd', y='UF', orientation='h', 
-                         text_auto=True, color='Qtd', color_continuous_scale=cor_ranking, height=700)
+            fig = px.bar(df_uf.head(30), x='Qtd', y='UF', orientation='h', text_auto=True, color='Qtd', height=700)
         
         fig.update_layout(yaxis=dict(autorange="reversed"))
         st.plotly_chart(padronizar_grafico(fig, tema), use_container_width=True)
 
         st.divider()
 
-        # --- RANKING DE MUNICÍPIOS (COR CONDICIONAL) ---
-        st.markdown(f"### 🏙️ Ranking de Municípios ({tipo_metrica})")
+        # --- RANKING DE MUNICÍPIOS (GRANDE / FULL WIDTH) ---
+        st.markdown(f"### 🏙️ Top 30 Municípios ({tipo_metrica})")
         df_m_c = df_f.groupby(['MUNICIPIO', 'UF']).size().reset_index(name='Qtd')
         
-        if tipo_metrica == "Taxa por 1.000 hab" and not df_pop.empty:
+        if tipo_metrica == "Taxa (por 1.000 hab.)" and not df_pop.empty:
             df_m_c['mun_n'] = df_m_c['MUNICIPIO'].str.upper().str.strip()
             df_m2 = pd.merge(df_m_c, df_pop, left_on=['mun_n', 'UF'], right_on=['municipio_norm', 'uf_norm'])
-            df_m2 = df_m2[df_m2['populacao'] > 5000] # Filtra cidades muito pequenas
+            df_m2 = df_m2[df_m2['populacao'] > 5000] # Filtro cidades muito pequenas
             df_m2['Valor'] = (df_m2['Qtd'] / df_m2['populacao']) * 1000
             df_m2['Label'] = df_m2['MUNICIPIO'] + "-" + df_m2['UF']
             
-            # TAXA = VERMELHO ('Reds')
-            fig = px.bar(df_m2.sort_values('Valor', ascending=False).head(30), x='Valor', y='Label', orientation='h', 
-                         text_auto='.2f', color='Valor', color_continuous_scale=cor_ranking, height=800)
+            fig = px.bar(df_m2.sort_values('Valor', ascending=False).head(30), x='Valor', y='Label', orientation='h', text_auto='.2f', color='Valor', height=800)
         else:
             df_m_c['Label'] = df_m_c['MUNICIPIO'] + "-" + df_m_c['UF']
-            # ABSOLUTO = AZUL ('Blues')
-            fig = px.bar(df_m_c.sort_values('Qtd', ascending=False).head(30), x='Qtd', y='Label', orientation='h', 
-                         text_auto=True, color='Qtd', color_continuous_scale=cor_ranking, height=800)
+            fig = px.bar(df_m_c.sort_values('Qtd', ascending=False).head(30), x='Qtd', y='Label', orientation='h', text_auto=True, color='Qtd', height=800)
         
         fig.update_layout(yaxis=dict(autorange="reversed"))
         st.plotly_chart(padronizar_grafico(fig, tema), use_container_width=True)
@@ -244,7 +225,7 @@ def render_prf(df, tema):
                 fig.update_layout(yaxis=dict(autorange="reversed"))
                 st.plotly_chart(padronizar_grafico(fig, tema), use_container_width=True)
 
-    # ABA 5: MAPA (COM ZOOM E LINHAS)
+    # ABA 5: MAPA
     with tabs[4]:
         st.subheader("Mapa de Calor (Densidade de Ocorrências)")
         if 'LAT' in df_f.columns and 'LON' in df_f.columns:
@@ -252,14 +233,7 @@ def render_prf(df, tema):
             if not coords.empty:
                 if len(coords) > 20000: coords = coords.sample(20000)
                 st.caption(f"Exibindo amostra de {len(coords):,} pontos georreferenciados.")
-                
-                # Mapa estilo Open Street Map com Zoom habilitado
-                fig_map = px.density_mapbox(
-                    coords, lat='LAT', lon='LON', radius=10, zoom=3, 
-                    center=dict(lat=-15.78, lon=-47.92),
-                    mapbox_style="open-street-map"
-                )
+                fig_map = px.density_mapbox(coords, lat='LAT', lon='LON', radius=5, zoom=3, center=dict(lat=-15.78, lon=-47.92), mapbox_style="carto-positron" if tema['bg_card'] == '#FFFFFF' else "carto-darkmatter")
                 fig_map.update_layout(height=600, margin={"r":0,"t":0,"l":0,"b":0})
-                st.plotly_chart(fig_map, use_container_width=True, config={'scrollZoom': True})
-            else: 
-                st.warning("Sem coordenadas válidas registradas.")
+                st.plotly_chart(fig_map, use_container_width=True)
+            else: st.warning("Sem coordenadas válidas registradas.")
