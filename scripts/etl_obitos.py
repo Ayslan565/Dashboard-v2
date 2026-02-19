@@ -3,9 +3,7 @@ import os
 import unicodedata
 import re
 import math
-import time
 from sqlalchemy import create_engine, text
-from sqlalchemy.types import String, Integer
 from concurrent.futures import ProcessPoolExecutor
 
 # --- CONFIGURAÇÃO ---
@@ -21,6 +19,7 @@ def worker_salvar_chunk(dados_chunk):
     try:
         engine_worker = create_engine(DB_URL, pool_pre_ping=True)
         with engine_worker.connect() as conn:
+            # MODO 'append' para adicionar sem apagar a tabela existente
             dados_chunk.to_sql('obitos_transporte', con=conn, if_exists='append', index=False, chunksize=1000)
     except Exception as e:
         print(f"  [Erro Worker] {e}")
@@ -32,19 +31,14 @@ def remover_acentos(texto):
     return "".join([c for c in nfkd if not unicodedata.combining(c)])
 
 def limpar_header(col):
-    """
-    Transforma: 'local (uid)' -> 'local_uid'
-    Transforma: 'MarÃ§o' -> 'marco'
-    """
     c = col.lower().strip()
     c = remover_acentos(c)
     
-    # Substituições específicas do seu arquivo
+    # Padronização específica
     c = c.replace(' (uid)', '_uid')
     c = c.replace(' (nome)', '_nome')
     c = c.replace(' ', '_')
     
-    # Meses
     mapa_meses = {
         'jan': 'janeiro', 'fev': 'fevereiro', 'mar': 'marco', 'abr': 'abril',
         'mai': 'maio', 'jun': 'junho', 'jul': 'julho', 'ago': 'agosto',
@@ -60,77 +54,141 @@ def normalizar_colunas(df):
     novas_colunas = [limpar_header(c) for c in df.columns]
     df.columns = novas_colunas
     
-    # Garante que 'total' vire 'total_anual' se vier só 'ano' ou 'total' no final
-    if 'total' in df.columns: df.rename(columns={'total': 'total_anual'}, inplace=True)
-    # Se tiver duas colunas 'ano', o pandas coloca 'ano.1'. A gente ajusta.
-    cols = []
-    for c in df.columns:
-        if c == 'ano.1': cols.append('total_anual') # As vezes o total vem com nome de Ano
-        else: cols.append(c)
-    df.columns = cols
+    cols_map = {}
+    for col in df.columns:
+        if col == 'ano': 
+            cols_map[col] = 'total_anual'
+        elif col == 'ano.1':
+            cols_map[col] = 'total_anual'
+            
+    if cols_map:
+        df.rename(columns=cols_map, inplace=True)
     
-    return df.loc[:, ~df.columns.duplicated()]
+    # Remove colunas duplicadas
+    df = df.loc[:, ~df.columns.duplicated()]
+    return df
 
-# --- PROCESSAMENTO ---
+def validar_estrutura(df):
+    """
+    Verifica se a aba do Excel tem cara de dados brutos.
+    Abas de resumo (com 'Soma de Ano', 'Vários itens') serão ignoradas.
+    """
+    # Converte colunas para minúsculo para verificar
+    cols = [str(c).lower() for c in df.columns]
+    
+    # Critérios: Deve ter coluna de mês OU coluna de ano com UID
+    tem_janeiro = any('jan' in c for c in cols)
+    tem_ano_uid = any('ano' in c and 'uid' in c for c in cols)
+    
+    # Se não tiver nenhum desses, provavelmente é uma aba de resumo
+    return tem_janeiro or tem_ano_uid
+
+def tratar_dataframe(df, nome_origem):
+    try:
+        # 1. Validação: Ignora abas que não são de dados brutos
+        if not validar_estrutura(df):
+            print(f"    -> [Ignorado] Aba de resumo ou estrutura diferente: {nome_origem}")
+            return pd.DataFrame()
+
+        # 2. Normaliza cabeçalhos
+        df = normalizar_colunas(df)
+        
+        # 3. Remove linhas de rodapé (lixo no final do arquivo)
+        if 'ano_uid' in df.columns:
+            df = df[pd.to_numeric(df['ano_uid'], errors='coerce').notna()]
+        
+        # 4. Limpa asteriscos nos anos (ex: "2025*")
+        if 'ano_nome' in df.columns:
+            df['ano_nome'] = df['ano_nome'].astype(str).str.replace('*', '', regex=False).str.strip()
+        
+        # 5. Tratamento de Meses e Total
+        meses = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 
+                 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro', 'total_anual']
+        
+        for col in meses:
+            if col not in df.columns: 
+                if col != 'total_anual': df[col] = 0
+            else:
+                # Remove pontos de milhar e converte para inteiro
+                df[col] = df[col].astype(str).str.replace('.', '', regex=False).replace('-', '0')
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+
+        # 6. Preenche textos vazios
+        cols_text = [c for c in df.columns if c not in meses and 'uid' not in c]
+        for c in cols_text:
+            df[c] = df[c].astype(str).replace('nan', 'NI').replace('None', 'NI')
+
+        # 7. Garante UIDs como Inteiros
+        cols_uid = [c for c in df.columns if 'uid' in c]
+        for c in cols_uid:
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).astype(int)
+            
+        print(f"    -> Processado: {len(df):,} linhas.")
+        return df
+
+    except Exception as e:
+        print(f"    -> ERRO ao tratar {nome_origem}: {e}")
+        return pd.DataFrame()
+
+# --- PROCESSAMENTO PRINCIPAL ---
 def processar_obitos(PLANILHAS):
-    # Procura qualquer arquivo com 'localidade' ou 'obitos'
-    arquivos = [f for f in os.listdir(PLANILHAS) if ('localidade' in f.lower() or 'obito' in f.lower()) and f.endswith('.csv')]
+    # Procura especificamente o seu arquivo Excel ou outros CSVs
+    arquivos = [f for f in os.listdir(PLANILHAS) 
+                if (('ms' in f.lower() or 'obito' in f.lower()) and 
+                    (f.endswith('.xlsx') or f.endswith('.xls') or f.endswith('.csv')))]
     
     lista_dfs = []
-    print(f"\n--- PROCESSANDO {len(arquivos)} ARQUIVOS ---")
+    print(f"\n--- ENCONTRADOS {len(arquivos)} ARQUIVOS ---")
     
     for arq in arquivos:
         caminho = os.path.join(PLANILHAS, arq)
+        print(f"\nArquivo: {arq}")
+        
         try:
-            try: df = pd.read_csv(caminho, encoding='utf-8', sep=';', low_memory=False)
-            except: df = pd.read_csv(caminho, encoding='latin-1', sep=';', low_memory=False)
-            
-            # Normaliza os cabeçalhos novos (uid/nome)
-            df = normalizar_colunas(df)
-            
-            # Garante que meses sejam números
-            meses = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 
-                     'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
-            
-            for mes in meses:
-                if mes not in df.columns: df[mes] = 0
-                else:
-                    df[mes] = df[mes].astype(str).str.replace('.', '', regex=False).replace('-', '0')
-                    df[mes] = pd.to_numeric(df[mes], errors='coerce').fillna(0).astype(int)
+            # --- LÓGICA PARA EXCEL (.xlsx) ---
+            if arq.endswith('.xlsx') or arq.endswith('.xls'):
+                print("  Lendo todas as abas do Excel...")
+                # sheet_name=None carrega TODAS as abas num dicionário
+                xls = pd.read_excel(caminho, sheet_name=None)
+                
+                for nome_aba, df_aba in xls.items():
+                    print(f"  > Aba '{nome_aba}': ", end="")
+                    df_limpo = tratar_dataframe(df_aba, f"{arq}::{nome_aba}")
+                    if not df_limpo.empty:
+                        lista_dfs.append(df_limpo)
 
-            # Preenche textos vazios
-            cols_text = [c for c in df.columns if c not in meses and 'uid' not in c]
-            for c in cols_text:
-                df[c] = df[c].astype(str).replace('nan', 'NI')
-
-            # Trata UIDs como Inteiros (se possível) ou String
-            cols_uid = [c for c in df.columns if 'uid' in c]
-            for c in cols_uid:
-                df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).astype(int)
-
-            print(f"  ✓ {arq}: {len(df):,} linhas.")
-            lista_dfs.append(df)
+            # --- LÓGICA PARA CSV (caso exista algum solto) ---
+            else:
+                print("  Lendo CSV... ", end="")
+                try: df = pd.read_csv(caminho, encoding='utf-8', sep=',', low_memory=False)
+                except: 
+                    try: df = pd.read_csv(caminho, encoding='latin-1', sep=';', low_memory=False)
+                    except: df = pd.read_csv(caminho, encoding='utf-8', sep=';', low_memory=False)
+                
+                df_limpo = tratar_dataframe(df, arq)
+                if not df_limpo.empty:
+                    lista_dfs.append(df_limpo)
+            
         except Exception as e:
-            print(f"  ERRO {arq}: {e}")
+            print(f"  FALHA NO ARQUIVO: {e}")
 
     if lista_dfs: return pd.concat(lista_dfs, ignore_index=True)
     return pd.DataFrame()
 
 def salvar_banco(df):
-    if df.empty: return
+    if df.empty: 
+        print("  -> Nenhum dado válido encontrado para salvar.")
+        return
     
-    # Remove colunas duplicadas ou estranhas
+    # Remove duplicatas gerais antes de salvar
     df = df.loc[:, ~df.columns.duplicated()]
-    
-    print(f"\n--- SALVANDO NO BANCO ({len(df):,} linhas) ---")
+    print(f"\n--- ADICIONANDO AO BANCO ({len(df):,} linhas totais) ---")
     
     try:
         with engine_principal.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS obitos_transporte"))
-            
-            # CRIA A TABELA COM AS COLUNAS NOVAS (UID/NOME)
+            # Cria a tabela SE NÃO EXISTIR (preserva dados antigos)
             sql = """
-            CREATE TABLE obitos_transporte (
+            CREATE TABLE IF NOT EXISTS obitos_transporte (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 ano_uid INT, ano_nome VARCHAR(20),
                 local_uid INT, local_nome VARCHAR(100),
@@ -152,7 +210,7 @@ def salvar_banco(df):
             conn.execute(text(sql))
             conn.commit()
         
-        # Mapeia colunas do DF para o Banco (Ignora o que não bater)
+        # Filtra apenas colunas que existem na tabela
         cols_validas = [
             'ano_uid', 'ano_nome', 'local_uid', 'local_nome', 
             'indicador_uid', 'indicador_nome', 'categoria_uid', 'categoria_nome',
@@ -161,18 +219,14 @@ def salvar_banco(df):
             'racacor_uid', 'racacor_nome', 'sexo_uid', 'sexo_nome',
             'abrangencia_uid', 'abrangencia_nome', 'localidade_uid', 'localidade_nome',
             'janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho',
-            'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'
+            'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+            'total_anual'
         ]
         
-        # Adiciona total_anual se existir, senão calcula
-        if 'total_anual' in df.columns:
-            cols_validas.append('total_anual')
-        
-        # Filtra colunas
         final_cols = [c for c in cols_validas if c in df.columns]
         df_final = df[final_cols]
         
-        # Salva
+        # Salva em paralelo (Append)
         num_workers = max(1, os.cpu_count() - 1)
         chunk = math.ceil(len(df_final) / num_workers)
         chunks = [df_final[i:i + chunk] for i in range(0, len(df_final), chunk)]
@@ -180,15 +234,17 @@ def salvar_banco(df):
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
             list(executor.map(worker_salvar_chunk, chunks))
             
-        print("  ✓ SUCESSO! Tabela atualizada com estrutura UID/NOME.")
+        print("  ✓ SUCESSO! Novos dados adicionados.")
 
     except Exception as e:
-        print(f"  ERRO CRÍTICO: {e}")
+        print(f"  ERRO CRÍTICO NO SALVAMENTO: {e}")
 
 if __name__ == "__main__":
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     PLANILHAS = os.path.join(os.path.dirname(BASE_DIR), 'Planilhas')
     
-    df = processar_obitos(PLANILHAS)
-    salvar_banco(df)
-    
+    if not os.path.exists(PLANILHAS):
+        print(f"ERRO: Pasta '{PLANILHAS}' não encontrada.")
+    else:
+        df = processar_obitos(PLANILHAS)
+        salvar_banco(df)

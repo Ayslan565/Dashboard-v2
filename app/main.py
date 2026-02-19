@@ -1,9 +1,9 @@
 import streamlit as st
 import os
 from PIL import Image
-# Importa as views
-from views import produtos, prf, obitos 
-# Importa as funções de carregamento (Versão Original Estável)
+# Importa as views atualizadas
+from views import produtos, prf, obitos, comparativo 
+# Importa as funções de carregamento do utils.py
 from utils import carregar_dados_gerais, carregar_dados_prf, carregar_dados_obitos, get_tema_config
 
 # 1. Configuração da Página
@@ -16,7 +16,7 @@ st.set_page_config(
 # 2. Configuração do Menu Lateral
 st.sidebar.header("⚙️ Configurações")
 
-# --- Toggle de Tema ---
+# --- Toggle de Tema (Padrão: Claro conforme sua preferência) ---
 col_toggle, col_txt = st.sidebar.columns([1, 4])
 with col_toggle:
     usar_tema_escuro = st.toggle("", value=False)
@@ -33,7 +33,7 @@ if st.sidebar.button("🔄 Atualizar Dados", help="Recarrega os dados do banco")
 
 st.sidebar.divider()
 
-# --- Navegação ---
+# --- Navegação Atualizada ---
 st.sidebar.subheader("Navegação")
 pagina = st.sidebar.radio(
     "Ir para:", 
@@ -41,12 +41,13 @@ pagina = st.sidebar.radio(
         "📊 Painel PNATRANS", 
         "📈 Análise Temporal", 
         "🚗 Sinistros PRF", 
-        "🏥 Óbitos (DATASUS)"
+        "🏥 Óbitos (DATASUS)",
+        "⚖️ Comparativo Geral" # Nova aba adicionada
     ],
     label_visibility="collapsed"
 )
 
-# 3. CSS Otimizado (ESTILOS RESTAURADOS)
+# 3. CSS Otimizado (Estilos da Sidebar e Cards KPI)
 st.markdown(f"""
     <style>
         /* Fundo e Texto Global */
@@ -118,6 +119,8 @@ df_mapa, df_org, df_prod, df_status, df_users, df_raw, df_mun = carregar_dados_g
 
 # 5. Header Principal
 c_logo, c_titulo = st.columns([1, 8])
+
+# Tenta carregar o logo da pasta components
 img_path = os.path.join(os.path.dirname(__file__), "components", "image.png")
 
 if os.path.exists(img_path):
@@ -136,13 +139,21 @@ if pagina == "📊 Painel PNATRANS":
     produtos.render_visao_geral(df_mapa, df_org, df_prod, df_status, cfg, df_mun, df_users)
 
 elif pagina == "📈 Análise Temporal":
+    # Passamos df_raw para análise temporal também, pois ele tem as datas detalhadas
     produtos.render_analise_temporal(df_raw, cfg)
 
 elif pagina == "🚗 Sinistros PRF":
-    # Carregamento TOTAL aqui (Método original que garante os dados)
     df_prf = carregar_dados_prf()
     prf.render_prf(df_prf, cfg)
 
 elif pagina == "🏥 Óbitos (DATASUS)":
     df_obitos = carregar_dados_obitos()
     obitos.render_obitos(df_obitos, cfg)
+
+elif pagina == "⚖️ Comparativo Geral":
+    # Carrega dados necessários para o cruzamento de informações
+    df_obitos = carregar_dados_obitos()
+    
+    # ATENÇÃO: Passamos df_raw (tabela bruta de produtos) em vez de df_prod
+    # df_raw contém as colunas de data/ano necessárias para o eixo X do gráfico
+    comparativo.render_comparativo(df_raw, df_obitos, cfg)

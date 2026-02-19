@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import os
 import ssl
 import json
 from sqlalchemy import create_engine
@@ -65,29 +64,53 @@ def padronizar_grafico(fig, tema):
 # --- CARREGAMENTO GERAL ---
 @st.cache_data(ttl=3600)
 def carregar_dados_gerais():
+    """
+    Carrega dados de gestão do Banco de Dados.
+    Busca especificamente a tabela 'produtos_resultados' para o df_raw.
+    """
     try:
         engine = create_engine('mysql+pymysql://root:Jjjb3509@127.0.0.1:3306/db_pnatrans')
         with engine.connect() as conn:
+            # 1. Tabelas Estatísticas (Já processadas para KPIs)
             df_mapa = pd.read_sql("SELECT * FROM ranking_uf", conn)
             df_org = pd.read_sql("SELECT * FROM orgaos_completo", conn)
             df_prod = pd.read_sql("SELECT * FROM stats_produtos", conn)
+            
             try: df_status = pd.read_sql("SELECT * FROM stats_status_uf", conn)
             except: df_status = pd.DataFrame()
+            
             try: df_users = pd.read_sql("SELECT * FROM usuarios", conn)
             except: df_users = pd.DataFrame()
+            
             try: df_mun = pd.read_sql("SELECT * FROM stats_municipios", conn)
             except: df_mun = pd.DataFrame()
 
-            return df_mapa, df_org.fillna("-"), df_prod.fillna(0), df_status.fillna(0), df_users.fillna("-"), pd.DataFrame(), df_mun
+            # 2. Tabela Bruta de Produtos (Para gráficos temporais e comparativos)
+            # Tenta ler 'produtos_resultados' conforme solicitado
+            df_raw = pd.DataFrame()
+            try:
+                df_raw = pd.read_sql("SELECT * FROM produtos_resultados", conn)
+            except Exception as e:
+                # Se falhar, tenta 'produtos' como fallback
+                try:
+                    df_raw = pd.read_sql("SELECT * FROM produtos", conn)
+                except:
+                    print(f"Aviso: Tabela de produtos brutos ('produtos_resultados') não encontrada: {e}")
+            
+            return df_mapa, df_org.fillna("-"), df_prod.fillna(0), df_status.fillna(0), df_users.fillna("-"), df_raw, df_mun
+            
     except Exception as e:
+        print(f"Erro Crítico de Conexão com o Banco: {e}")
+        # Retorna tupla de dataframes vazios para não quebrar a aplicação
         return (pd.DataFrame(),)*7
 
 # --- CARREGAMENTO PRF ---
-@st.cache_data(ttl=3600, show_spinner="Carregando base PRF completa...")
+@st.cache_data(ttl=3600, show_spinner="Carregando base PRF via Banco...")
 def carregar_dados_prf():
     try:
         engine = create_engine('mysql+pymysql://root:Jjjb3509@127.0.0.1:3306/db_pnatrans')
         with engine.connect() as conn:
+            # Seleciona colunas específicas para otimizar memória
             cols = """
                 ID, PESID, DATA_INVERSA, DIA_SEMANA, HORARIO, UF, BR, KM, MUNICIPIO,
                 CAUSA_PRINCIPAL, TIPO_ACIDENTE, CLASSIFICACAO_ACIDENTE, FASE_DIA,
@@ -136,7 +159,7 @@ def carregar_populacao():
     except:
         return pd.DataFrame()
 
-# --- CARREGAMENTO CAPACITAÇÕES (NOVO) ---
+# --- CARREGAMENTO CAPACITAÇÕES ---
 @st.cache_data(ttl=300)
 def carregar_capacitacoes():
     try:
