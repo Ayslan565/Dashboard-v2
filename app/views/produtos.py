@@ -228,18 +228,64 @@ def render_visao_geral(df_mapa, df_org, df_prod, df_status, tema, df_mun, df_use
             st.dataframe(df_users[cols], use_container_width=True)
     else: st.info("Nenhum ponto focal encontrado.")
 
+# =========================================================================
+# --- 8. ANÁLISE TEMPORAL (MÊS E ANO COM MAIS PRODUTOS) ---
+# =========================================================================
 def render_analise_temporal(df_raw, tema):
-    st.markdown("### 📈 Evolução de Produtos")
+    st.markdown("### 📈 Evolução de Cadastros (Meses e Anos com mais entregas)")
+    
     if df_raw.empty:
-        st.warning("Sem dados.")
+        st.warning("Sem dados para exibir na evolução.")
         return
-    col_data = next((c for c in df_raw.columns if 'DATA' in c.upper() or 'CRIADO' in c.upper()), None)
-    if col_data:
+        
+    if 'DATA_CADASTRO' in df_raw.columns:
         df = df_raw.copy()
-        df['DT'] = pd.to_datetime(df[col_data], errors='coerce', dayfirst=True).dropna()
-        if 'TIPO_FONTE' in df.columns: df = df[df['TIPO_FONTE'] == 'REALIZADO']
+        
+        # Converte para data verdadeira, forçando o formato brasileiro (dia/mês/ano)
+        df['DT'] = pd.to_datetime(df['DATA_CADASTRO'], errors='coerce', dayfirst=True).dropna()
+        
+        # 🚨 FILTRO ANTIBUG: Remove qualquer data que seja maior que a data de hoje (Futuro)
+        hoje = pd.Timestamp.today()
+        df = df[df['DT'] <= hoje]
+        
+        # Filtra apenas o que já foi REALIZADO
+        if 'STATUS_LIMPO' in df.columns: 
+            df = df[df['STATUS_LIMPO'] == 'REALIZADO'] 
+            
         if not df.empty:
-            df['Mes'] = df['DT'].dt.to_period('M').astype(str)
-            df_g = df.groupby('Mes').size().reset_index(name='Qtd').sort_values('Mes')
-            fig = px.line(df_g, x='Mes', y='Qtd', markers=True)
+            # Dicionário de tradução dos meses
+            meses_pt = {
+                1: 'Janeiro', 2: 'Fevereiro', 3: 'Março', 4: 'Abril',
+                5: 'Maio', 6: 'Junho', 7: 'Julho', 8: 'Agosto',
+                9: 'Setembro', 10: 'Outubro', 11: 'Novembro', 12: 'Dezembro'
+            }
+            
+            # Cria a coluna invisível para ordenar cronologicamente (ex: '2023-10')
+            df['Ordem_Mes'] = df['DT'].dt.to_period('M').astype(str)
+            
+            # Cria a coluna bonita para exibir no eixo X (ex: 'Janeiro de 2025')
+            df['Mes_Exibicao'] = df['DT'].dt.month.map(meses_pt) + ' de ' + df['DT'].dt.year.astype(str)
+            
+            # Agrupa os dados
+            df_g = df.groupby(['Ordem_Mes', 'Mes_Exibicao']).size().reset_index(name='Qtd').sort_values('Ordem_Mes')
+            
+            # Gráfico de Barras colorido evidenciando o volume
+            fig = px.bar(df_g, x='Mes_Exibicao', y='Qtd', text_auto=True, 
+                         color='Qtd', color_continuous_scale='Blues',
+                         labels={'Mes_Exibicao': 'Período', 'Qtd': 'Produtos Entregues'})
+            
+            fig.update_layout(
+                xaxis_title="Mês e Ano", 
+                yaxis_title="Quantidade de Produtos",
+                xaxis={
+                    'type': 'category',
+                    'categoryorder': 'array',
+                    'categoryarray': df_g['Mes_Exibicao'] # Força a ordem exata
+                } 
+            )
+            
             st.plotly_chart(padronizar_grafico(fig, tema), use_container_width=True)
+        else:
+            st.info("Nenhum produto com data de cadastro válida no passado foi encontrado.")
+    else:
+        st.warning("A coluna 'DATA_CADASTRO' não foi encontrada. Verifique se o ETL rodou com sucesso.")

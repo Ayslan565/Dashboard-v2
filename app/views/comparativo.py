@@ -4,169 +4,143 @@ from plotly.subplots import make_subplots
 import pandas as pd
 from utils import padronizar_grafico
 
-# Dicionário para converter nomes de estados em siglas
+# Dicionário de normalização para garantir que nomes de estados virem siglas padrão
 MAPA_ESTADOS = {
-    'ACRE': 'AC', 'ALAGOAS': 'AL', 'AMAPA': 'AP', 'AMAPÁ': 'AP', 'AMAZONAS': 'AM',
-    'BAHIA': 'BA', 'CEARA': 'CE', 'CEARÁ': 'CE', 'DISTRITO FEDERAL': 'DF',
-    'ESPIRITO SANTO': 'ES', 'ESPÍRITO SANTO': 'ES', 'GOIAS': 'GO', 'GOIÁS': 'GO',
-    'MARANHAO': 'MA', 'MARANHÃO': 'MA', 'MATO GROSSO': 'MT', 'MATO GROSSO DO SUL': 'MS',
-    'MINAS GERAIS': 'MG', 'PARA': 'PA', 'PARÁ': 'PA', 'PARAIBA': 'PB', 'PARAÍBA': 'PB',
-    'PARANA': 'PR', 'PARANÁ': 'PR', 'PERNAMBUCO': 'PE', 'PIAUI': 'PI', 'PIAUÍ': 'PI',
+    'ACRE': 'AC', 'ALAGOAS': 'AL', 'AMAPA': 'AP', 'AMAZONAS': 'AM',
+    'BAHIA': 'BA', 'CEARA': 'CE', 'DISTRITO FEDERAL': 'DF',
+    'ESPIRITO SANTO': 'ES', 'GOIAS': 'GO', 'MARANHAO': 'MA', 
+    'MATO GROSSO': 'MT', 'MATO GROSSO DO SUL': 'MS',
+    'MINAS GERAIS': 'MG', 'PARA': 'PA', 'PARAIBA': 'PB',
+    'PARANA': 'PR', 'PERNAMBUCO': 'PE', 'PIAUI': 'PI',
     'RIO DE JANEIRO': 'RJ', 'RIO GRANDE DO NORTE': 'RN', 'RIO GRANDE DO SUL': 'RS',
-    'RONDONIA': 'RO', 'RONDÔNIA': 'RO', 'RORAIMA': 'RR', 'SANTA CATARINA': 'SC',
-    'SAO PAULO': 'SP', 'SÃO PAULO': 'SP', 'SERGIPE': 'SE', 'TOCANTINS': 'TO'
+    'RONDONIA': 'RO', 'RORAIMA': 'RR', 'SANTA CATARINA': 'SC',
+    'SAO PAULO': 'SP', 'SERGIPE': 'SE', 'TOCANTINS': 'TO'
 }
 
-def normalizar_uf(valor):
-    """Converte nome ou sigla para Sigla (ex: 'São Paulo' -> 'SP')"""
-    if pd.isna(valor): return None
-    v = str(valor).upper().strip()
-    if len(v) == 2: return v
-    return MAPA_ESTADOS.get(v, v)
+def normalizar_texto(texto):
+    """Padronização para comparação segura entre strings (Mogi == MOJI)."""
+    if pd.isna(texto): return ""
+    import unicodedata
+    s = str(texto).upper().strip()
+    nfkd = unicodedata.normalize('NFKD', s)
+    return "".join([c for c in nfkd if not unicodedata.combining(c)])
 
-def render_comparativo(df_prod_raw, df_obitos, tema):
-    st.markdown("### ⚖️ Correlação: Entregas vs. Sinistralidade")
-    
-    # --- 1. VALIDAÇÃO DOS PRODUTOS ---
-    if df_prod_raw is None or df_prod_raw.empty:
-        st.warning("⚠️ Tabela de Produtos está vazia.")
+def render_comparativo(df_prod_raw, df_prf_raw, tema):
+    st.markdown("### ⚖️ Comparativo PNATRANS vs. Vítimas Fatais (PRF)")
+    st.info("Este painel cruza o volume de metas entregues com o total de mortos registrados pela PRF em rodovias federais.")
+
+    if df_prod_raw.empty or df_prf_raw.empty:
+        st.warning("⚠️ Dados insuficientes no banco para gerar a comparação.")
         return
 
-    # Prepara DF Produtos
+    # --- 1. PREPARAÇÃO DOS DATASETS (Conforme memorizado do render_prf) ---
+    # Produtos PNATRANS
     df_p = df_prod_raw.copy()
-    df_p.columns = [str(c).upper().strip() for c in df_p.columns]
+    df_p.columns = [c.upper() for c in df_p.columns]
+    if 'STATUS_LIMPO' in df_p.columns:
+        df_p = df_p[df_p['STATUS_LIMPO'] == 'REALIZADO']
 
-    # Prepara DF Óbitos
-    df_o = df_obitos.copy() if not df_obitos.empty else pd.DataFrame()
-    if not df_o.empty:
-        df_o.columns = [c.lower().strip() for c in df_o.columns]
+    # Dados PRF
+    df_prf = df_prf_raw.copy()
+    df_prf.columns = [c.upper() for c in df_prf.columns]
+    if 'MORTOS' not in df_prf.columns:
+        st.warning("⚠️ O conjunto de dados PRF não contém a coluna 'MORTOS'. Não é possível gerar o comparativo.")
+        return
+    df_prf['MORTOS'] = pd.to_numeric(df_prf['MORTOS'], errors='coerce').fillna(0)
 
-    # --- 2. FILTRO DE ESTADO (OPCIONAL) ---
-    col_uf_prod = next((c for c in ['UF', 'ESTADO', 'SG_UF'] if c in df_p.columns), None)
-    col_uf_obito = next((c for c in ['local_nome', 'uf', 'estado', 'nome'] if c in df_o.columns), None)
-
-    opcoes_uf = set()
-    if col_uf_prod: opcoes_uf.update(df_p[col_uf_prod].dropna().apply(normalizar_uf).unique())
-    if col_uf_obito and not df_o.empty: opcoes_uf.update(df_o[col_uf_obito].dropna().apply(normalizar_uf).unique())
+    # --- 2. SIDEBAR: FILTROS INTEGRADOS ---
+    st.sidebar.divider()
+    st.sidebar.subheader("🎯 Filtros de Cruzamento")
     
-    lista_ufs = sorted([x for x in opcoes_uf if x is not None])
+    col_uf_p = 'UF_LIMPA' if 'UF_LIMPA' in df_p.columns else 'UF'
+    col_mun_p = 'MUNICIPIO_LIMPO' if 'MUNICIPIO_LIMPO' in df_p.columns else 'MUNICIPIO'
     
-    col_filtro, _ = st.columns([1, 3])
-    with col_filtro:
-        uf_selecionada = st.selectbox("🌍 Filtrar por Região/Estado:", ["BRASIL (Todos)"] + lista_ufs)
+    # Lista de UFs baseada nos dados de gestão
+    lista_ufs = sorted(df_p[col_uf_p].dropna().unique())
+    sel_uf = st.sidebar.selectbox("🗺️ Selecione a UF:", ["BRASIL (Todas as BRs)"] + lista_ufs)
 
-    # Aplica Filtro
-    titulo_grafico = "Brasil (Consolidado)"
-    if uf_selecionada != "BRASIL (Todos)":
-        titulo_grafico = f"Estado: {uf_selecionada}"
-        if col_uf_prod:
-            df_p['_UF_NORM'] = df_p[col_uf_prod].apply(normalizar_uf)
-            df_p = df_p[df_p['_UF_NORM'] == uf_selecionada]
-        if col_uf_obito and not df_o.empty:
-            df_o['_UF_NORM'] = df_o[col_uf_obito].apply(normalizar_uf)
-            df_o = df_o[df_o['_UF_NORM'] == uf_selecionada]
+    sel_mun = "Todos os Municípios"
+    if sel_uf != "BRASIL (Todas as BRs)":
+        muns_disponiveis = sorted(df_p[df_p[col_uf_p] == sel_uf][col_mun_p].dropna().unique())
+        sel_mun = st.sidebar.selectbox("🏙️ Selecione o Município:", ["Todos os Municípios"] + muns_disponiveis)
 
-    # --- 3. PROCESSAMENTO DE PRODUTOS (POR ANO) ---
-    cols_ano = ['ANO', 'ANO_BASE', 'EXERCICIO']
-    cols_data = ['DATA CRIACAO', 'DATA_CRIACAO', 'DT_CRIACAO', 'CRIADO EM', 'CREATED_AT', 'DATA']
+    # --- 3. APLICAÇÃO DA LÓGICA DE FILTRAGEM ---
+    titulo_local = "Brasil (Visão Consolidada)"
     
-    col_ano = next((c for c in cols_ano if c in df_p.columns), None)
-    df_p['ANO_FINAL'] = None
-
-    if col_ano:
-        df_p['ANO_FINAL'] = df_p[col_ano]
-    else:
-        col_data = next((c for c in cols_data if c in df_p.columns), None)
-        if col_data:
-            df_p['DATA_TEMP'] = pd.to_datetime(df_p[col_data], errors='coerce', dayfirst=True)
-            df_p = df_p.dropna(subset=['DATA_TEMP'])
-            df_p['ANO_FINAL'] = df_p['DATA_TEMP'].dt.year
-
-    # Limpeza e Filtro Temporal (2018-2025)
-    df_p['ANO_FINAL'] = pd.to_numeric(df_p['ANO_FINAL'], errors='coerce')
-    df_p = df_p.dropna(subset=['ANO_FINAL'])
-    df_p['ANO_FINAL'] = df_p['ANO_FINAL'].astype(int)
-    df_p = df_p[(df_p['ANO_FINAL'] >= 2018) & (df_p['ANO_FINAL'] <= 2025)]
-
-    df_prod_ano = df_p.groupby('ANO_FINAL').size().reset_index(name='Qtd_Produtos')
-    df_prod_ano.rename(columns={'ANO_FINAL': 'Ano'}, inplace=True)
-
-    # --- 4. PROCESSAMENTO DE ÓBITOS (USANDO TOTAL_ANUAL) ---
-    if df_o.empty:
-        df_obitos_ano = pd.DataFrame(columns=['Ano', 'Obitos'])
-    else:
-        # Identifica Ano
-        col_ano_obito = next((c for c in ['ano_uid', 'ano', 'ano_nome'] if c in df_o.columns), None)
+    if sel_uf != "BRASIL (Todas as BRs)":
+        df_p = df_p[df_p[col_uf_p] == sel_uf]
+        df_prf = df_prf[df_prf['UF'] == sel_uf]
+        titulo_local = f"Rodovias Federais em {sel_uf}"
         
-        if col_ano_obito:
-            df_o['Ano'] = df_o[col_ano_obito].astype(str).str.replace(r'\D', '', regex=True)
-            df_o['Ano'] = pd.to_numeric(df_o['Ano'], errors='coerce').fillna(0).astype(int)
+        if sel_mun != "Todos os Municípios":
+            df_p = df_p[df_p[col_mun_p] == sel_mun]
+            # Normalização de texto para garantir o match (PRF costuma vir sem acentos)
+            df_prf['_MUN_NORM'] = df_prf['MUNICIPIO'].apply(normalizar_texto)
+            df_prf = df_prf[df_prf['_MUN_NORM'] == normalizar_texto(sel_mun)]
+            titulo_local = f"Município: {sel_mun} / {sel_uf}"
 
-            # === AQUI ESTÁ A LÓGICA PEDIDA: USA COLUNA TOTAL_ANUAL ===
-            if 'total_anual' in df_o.columns:
-                # Converte para numérico para garantir a soma correta
-                df_o['Obitos'] = pd.to_numeric(df_o['total_anual'], errors='coerce').fillna(0)
-            else:
-                # Fallback: Se não existir total_anual, soma os meses
-                meses = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 
-                         'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
-                cols_meses = [c for c in meses if c in df_o.columns]
-                df_o['Obitos'] = df_o[cols_meses].sum(axis=1) if cols_meses else 0
-            
-            # Agrupa por Ano (Soma o total de todos os registros daquele ano)
-            df_obitos_ano = df_o.groupby('Ano')['Obitos'].sum().reset_index()
-        else:
-            df_obitos_ano = pd.DataFrame(columns=['Ano', 'Obitos'])
+    # --- 4. PROCESSAMENTO TEMPORAL (AGRUPAMENTO POR ANO) ---
+    # Produtos: Extração de ano da coluna de data
+    col_data_p = 'DATA_CADASTRO' if 'DATA_CADASTRO' in df_p.columns else 'DATA'
+    df_p['ANO_REF'] = pd.to_datetime(df_p[col_data_p], errors='coerce', dayfirst=True).dt.year
+    df_p_ano = df_p.dropna(subset=['ANO_REF']).groupby('ANO_REF').size().reset_index(name='METAS')
+    df_p_ano.rename(columns={'ANO_REF': 'ANO'}, inplace=True)
 
-    # --- 5. UNIFICAÇÃO E GRÁFICO ---
-    df_final = pd.merge(df_prod_ano, df_obitos_ano, on='Ano', how='outer').fillna(0).sort_values('Ano')
-    df_final = df_final[(df_final['Ano'] >= 2018) & (df_final['Ano'] <= 2025)]
+    # PRF: Agrupamento da soma de mortos por ano
+    # (Se o arquivo PRF já tiver a coluna ANO, usamos ela; se não, extraímos da DATA_INVERSA)
+    if 'ANO' not in df_prf.columns and 'DATA_INVERSA' in df_prf.columns:
+        df_prf['ANO'] = pd.to_datetime(df_prf['DATA_INVERSA'], errors='coerce').dt.year
+    
+    df_prf_ano = df_prf.groupby('ANO')['MORTOS'].sum().reset_index(name='OBITOS_PRF')
+    
+    # --- 5. UNIÃO E CÁLCULOS ---
+    df_comp = pd.merge(df_p_ano, df_prf_ano, on='ANO', how='outer').fillna(0).sort_values('ANO')
+    df_comp = df_comp[(df_comp['ANO'] >= 2018) & (df_comp['ANO'] <= 2026)]
 
-    if df_final.empty:
-        st.info("Sem dados coincidentes para o período.")
+    if df_comp.empty or (df_comp['METAS'].sum() == 0 and df_comp['OBITOS_PRF'].sum() == 0):
+        st.info(f"Sem dados suficientes para exibir a correlação em {titulo_local}.")
         return
 
-    # Correlação
-    correlacao = df_final['Qtd_Produtos'].corr(df_final['Obitos'])
-    
-    # KPIs
+    # Correlação de Pearson
+    correlacao = df_comp['METAS'].corr(df_comp['OBITOS_PRF']) if len(df_comp) > 1 else 0
+
+    # KPIs superiores
     c1, c2, c3 = st.columns(3)
-    delta_prod = df_final['Qtd_Produtos'].iloc[-1] - df_final['Qtd_Produtos'].iloc[0] if len(df_final)>1 else 0
-    delta_obito = df_final['Obitos'].iloc[-1] - df_final['Obitos'].iloc[0] if len(df_final)>1 else 0
-
-    c1.metric("Evolução Entregas", f"{delta_prod:+.0f}")
-    c2.metric("Evolução Óbitos", f"{delta_obito:+.0f}", delta_color="inverse")
+    c1.metric("Metas PNATRANS", f"{df_comp['METAS'].sum():.0f}", f"{titulo_local}")
+    c2.metric("Mortes Registradas (PRF)", f"{df_comp['OBITOS_PRF'].sum():.0f}", delta_color="inverse")
     
-    texto_corr = "Sem correlação"
-    if correlacao < -0.5: texto_corr = "✅ Correlação Negativa (Ideal)"
-    elif correlacao > 0.5: texto_corr = "⚠️ Correlação Positiva (Alerta)"
-    
-    c3.metric("Correlação", f"{correlacao:.2f}", texto_corr)
+    status_msg = "✅ Impacto Positivo (Mortes em queda)" if correlacao < -0.3 else "⏳ Avaliando Impacto"
+    c3.metric("Correlação Entregas/Óbitos", f"{correlacao:.2f}", status_msg)
 
-    # Gráfico Dual Axis
+    # --- 6. GRÁFICO DUAL AXIS ---
+    # [Image of dual axis chart comparing road safety goals and traffic fatalities]
     fig = make_subplots(specs=[[{"secondary_y": True}]])
+    
+    # Barras: Metas Realizadas (Produtos)
+    fig.add_trace(go.Bar(
+        x=df_comp['ANO'], y=df_comp['METAS'], name="Metas Realizadas",
+        marker_color='#00CC96', opacity=0.7, text=df_comp['METAS'], textposition='outside'
+    ), secondary_y=False)
 
+    # Linha: Óbitos PRF
     fig.add_trace(go.Scatter(
-        x=df_final['Ano'], y=df_final['Qtd_Produtos'], name="Produtos",
-        mode='lines+markers+text', text=df_final['Qtd_Produtos'], textposition='top center',
-        line=dict(color='#3366CC', width=4)), secondary_y=False)
-
-    fig.add_trace(go.Scatter(
-        x=df_final['Ano'], y=df_final['Obitos'], name="Óbitos",
-        mode='lines+markers+text',
-        text=df_final['Obitos'].apply(lambda x: f"{x:,.0f}"), # Formatação numérica simples
-        textposition='bottom center',
-        line=dict(color='#DC3912', width=4, dash='dot'), marker=dict(symbol='diamond')), secondary_y=True)
+        x=df_comp['ANO'], y=df_comp['OBITOS_PRF'], name="Vítimas Fatais (PRF)",
+        mode='lines+markers+text', text=df_comp['OBITOS_PRF'].astype(int),
+        textposition='bottom center', line=dict(color='#EF553B', width=4),
+        marker=dict(size=10, symbol='diamond')
+    ), secondary_y=True)
 
     fig.update_layout(
-        title=f"<b>Evolução 2018-2025:</b> Entregas vs. Óbitos - {titulo_grafico}",
-        hovermode="x unified", legend=dict(orientation="h", y=1.1), height=500
+        title=f"<b>Análise de Eficácia:</b> Entregas vs. Sinistralidade PRF - {titulo_local}",
+        legend=dict(orientation="h", y=1.1, x=0.5, xanchor="center"),
+        height=550, margin=dict(t=100)
     )
-    fig.update_xaxes(title_text="Ano", type='category')
-    fig.update_yaxes(title_text="Produtos", showgrid=False, secondary_y=False)
-    fig.update_yaxes(title_text="Óbitos", showgrid=True, secondary_y=True)
+    
+    fig.update_xaxes(type='category', title_text="Série Histórica (Ano)")
+    fig.update_yaxes(title_text="Quantidade de Produtos", secondary_y=False, showgrid=False)
+    fig.update_yaxes(title_text="Total de Óbitos (Vítimas Fatais)", secondary_y=True, showgrid=True)
 
     st.plotly_chart(padronizar_grafico(fig, tema), use_container_width=True)
 
-    with st.expander("📋 Ver Tabela de Dados"):
-        st.dataframe(df_final.set_index('Ano'), use_container_width=True)
+    with st.expander("📊 Tabela Detalhada do Cruzamento"):
+        st.dataframe(df_comp.set_index('ANO'), use_container_width=True)

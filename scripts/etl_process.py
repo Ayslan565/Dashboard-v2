@@ -94,10 +94,9 @@ def separar_codigo_produto(texto):
     else: return texto.split(' ')[0][:15], texto
 
 # ==============================================================================
-# 1. PROCESSAMENTO DE ACIDENTES PRF (CORRIGIDO PARA TEXTOS LONGOS)
+# 1. PROCESSAMENTO DE ACIDENTES PRF
 # ==============================================================================
 def processar_acidentes_prf(PLANILHAS):
-    # Lista arquivos que começam com 'acidentes' e terminam com '.csv'
     arquivos = [f for f in os.listdir(PLANILHAS) if f.startswith('acidentes') and f.endswith('.csv')]
     lista_dfs = []
     print("\n--- PROCESSANDO DADOS PRF ---")
@@ -105,13 +104,11 @@ def processar_acidentes_prf(PLANILHAS):
     for arq in arquivos:
         caminho = os.path.join(PLANILHAS, arq)
         try:
-            # Tenta ler com UTF-8, se falhar tenta Latin-1
             try: df = pd.read_csv(caminho, encoding='utf-8', sep=';', low_memory=False, on_bad_lines='skip')
             except: df = pd.read_csv(caminho, encoding='latin-1', sep=';', low_memory=False, on_bad_lines='skip')
             
             df = normalizar_colunas(df)
             
-            # Extração de Ano (do nome do arquivo ou da data)
             try:
                 ano = int(re.search(r'202\d', arq).group())
                 df['ANO'] = ano
@@ -119,32 +116,25 @@ def processar_acidentes_prf(PLANILHAS):
                 if 'DATA_INVERSA' in df.columns:
                     df['ANO'] = pd.to_datetime(df['DATA_INVERSA'], errors='coerce').dt.year.fillna(0).astype(int)
 
-            # Tratamento de Datas
             if 'DATA_INVERSA' in df.columns:
                 df['DATA_INVERSA'] = pd.to_datetime(df['DATA_INVERSA'], errors='coerce')
                 df['MES'] = df['DATA_INVERSA'].dt.month.fillna(0).astype(int)
             else:
                 df['MES'] = 0
 
-            # Preenche Textos Vazios (Evita Null que quebra inserção)
             cols_texto = ['MARCA', 'TIPO_VEICULO', 'SEXO', 'ESTADO_FISICO', 'CAUSA_PRINCIPAL', 
                           'TIPO_ACIDENTE', 'MUNICIPIO', 'UF', 'BR', 'TRACADO_VIA', 'REGIONAL', 
                           'DELEGACIA', 'UOP', 'CONDICAO_METEREOLOGICA', 'SENTIDO_VIA', 'TIPO_PISTA', 
                           'USO_SOLO', 'TIPO_ENVOLVIDO', 'CLASSIFICACAO_ACIDENTE', 'FASE_DIA']
             
             for col in cols_texto:
-                # Se a coluna não existir no CSV, cria preenchida com 'NÃO INFORMADO'
                 if col not in df.columns: df[col] = 'NÃO INFORMADO'
-                # Converte para string e preenche nulos
                 df[col] = df[col].astype(str).fillna('NÃO INFORMADO').replace('nan', 'NÃO INFORMADO')
 
-            # Tratamento de Causa (Prioriza descrição textual)
             if 'CAUSA_ACIDENTE' in df.columns and 'CAUSA_PRINCIPAL' in df.columns:
-                # Se CAUSA_PRINCIPAL for booleana (Sim/Não), usa a CAUSA_ACIDENTE como principal
                 if df['CAUSA_PRINCIPAL'].iloc[0] in ['Sim', 'Não', 'True', 'False']:
                     df['CAUSA_PRINCIPAL'] = df['CAUSA_ACIDENTE']
 
-            # Numéricos
             cols_num = ['IDADE', 'ILESOS', 'FERIDOS_LEVES', 'FERIDOS_GRAVES', 'MORTOS', 'FERIDOS', 'ID', 'PESID', 'ID_VEICULO', 'ANO_FABRICACAO_VEICULO']
             for col in cols_num:
                 if col in df.columns:
@@ -155,7 +145,6 @@ def processar_acidentes_prf(PLANILHAS):
             if df['FERIDOS'].sum() == 0:
                 df['FERIDOS'] = df['FERIDOS_LEVES'] + df['FERIDOS_GRAVES']
 
-            # Geo (Latitude/Longitude)
             for c in ['LATITUDE', 'LONGITUDE']:
                 if c in df.columns:
                     df[c] = df[c].astype(str).str.replace(',', '.').apply(lambda x: pd.to_numeric(x, errors='coerce'))
@@ -171,7 +160,6 @@ def processar_acidentes_prf(PLANILHAS):
 
 def salvar_prf_rapido(df):
     if df.empty: return False
-    # Remove duplicatas de colunas
     df = df.loc[:, ~df.columns.duplicated()]
     
     print(f"\n--- SALVANDO DADOS NO BANCO ({len(df):,} linhas) ---")
@@ -180,18 +168,17 @@ def salvar_prf_rapido(df):
             conn.execute(text("DROP TABLE IF EXISTS acidentes_prf"))
             conn.commit()
         
-        # --- TIPAGEM BLINDADA (TEXT para evitar erro 'Data too long') ---
         tipos_colunas = {
             'ID': Integer(), 'PESID': Integer(), 'DATA_INVERSA': Date(),
             'DIA_SEMANA': Text(), 'HORARIO': String(50),
-            'UF': String(10), 'BR': Text(), # Text evita erro de tamanho
+            'UF': String(10), 'BR': Text(),
             'KM': String(50), 'MUNICIPIO': Text(),
             'CAUSA_PRINCIPAL': Text(), 'TIPO_ACIDENTE': Text(),
             'CLASSIFICACAO_ACIDENTE': Text(), 'FASE_DIA': Text(),
             'SENTIDO_VIA': Text(), 'CONDICAO_METEREOLOGICA': Text(),
-            'TIPO_PISTA': Text(), 'TRACADO_VIA': Text(), # Text evita erro
+            'TIPO_PISTA': Text(), 'TRACADO_VIA': Text(),
             'USO_SOLO': Text(), 'ID_VEICULO': Integer(),
-            'TIPO_VEICULO': Text(), 'MARCA': Text(), # Text
+            'TIPO_VEICULO': Text(), 'MARCA': Text(),
             'ANO_FABRICACAO_VEICULO': Integer(), 'TIPO_ENVOLVIDO': Text(),
             'ESTADO_FISICO': Text(), 'IDADE': Integer(), 'SEXO': Text(),
             'ILESOS': Integer(), 'FERIDOS_LEVES': Integer(), 'FERIDOS_GRAVES': Integer(),
@@ -200,14 +187,11 @@ def salvar_prf_rapido(df):
             'ANO': Integer(), 'MES': Integer(), 'FERIDOS': Integer()
         }
         
-        # Filtra apenas colunas mapeadas que existem no DF
         colunas_validas = [c for c in df.columns if c in tipos_colunas.keys()]
         df_final = df[colunas_validas]
         
-        # Cria a tabela vazia
         df_final.head(0).to_sql('acidentes_prf', con=engine_principal, if_exists='replace', index=False, dtype=tipos_colunas)
         
-        # Salva em paralelo
         num_workers = max(1, os.cpu_count() - 1)
         tamanho_chunk = math.ceil(len(df_final) / num_workers)
         chunks = [df_final[i:i + tamanho_chunk] for i in range(0, len(df_final), tamanho_chunk)]
@@ -228,7 +212,7 @@ def salvar_prf_rapido(df):
         return False
 
 # ==============================================================================
-# 2. PROCESSAMENTO DE GESTÃO (COMPLETO)
+# 2. PROCESSAMENTO DE GESTÃO (COMPLETO E ATUALIZADO COM DATA DE CADASTRO)
 # ==============================================================================
 def processar_gestao(PLANILHAS):
     print("\n--- PROCESSANDO DADOS DE GESTÃO ---")
@@ -246,7 +230,7 @@ def processar_gestao(PLANILHAS):
         except: pass
 
     df_res, df_org, df_novos = dfs.get('prod'), dfs.get('org'), dfs.get('novos')
-    df_ranking, df_stats_status, df_top_produtos, df_top_mun = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    df_ranking, df_stats_status, df_top_produtos, df_top_mun, df_full = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     
     # Produtos
     if df_res is not None:
@@ -256,21 +240,32 @@ def processar_gestao(PLANILHAS):
         col_prod = achar_coluna(df_res, ['PRODUTO', 'META'])
         col_mun = achar_coluna(df_res, ['MUNICIPIO', 'CIDADE'])
         
+        # PROCURA A COLUNA DE DATA DE CADASTRO
+        # Você pode adicionar o nome exato da sua coluna aqui nesta lista caso seja um nome diferente
+        col_data = achar_coluna(df_res, ['DATA CADASTRO', 'DATA_CADASTRO', 'CRIADO EM', 'DATA', 'DATA DE CADASTRO'])
+        
         if col_uf:
             temp = df_res.copy()
             temp['UF_LIMPA'] = temp[col_uf].str.upper().str.strip()
             temp['STATUS_LIMPO'] = temp[col_status].apply(limpar_status_produto) if col_status else "REALIZADO"
             temp['MUNICIPIO_LIMPO'] = temp[col_mun].str.upper().str.strip() if col_mun else "NAO INFORMADO"
             
+            # EXTRAI A DATA E ADICIONA À TABELA
+            temp['DATA_CADASTRO'] = temp[col_data] if col_data else None
+            
             prod_full = temp[col_prod].str.strip() if col_prod else "NAO INFORMADO"
             codigos_desc = prod_full.apply(separar_codigo_produto)
             temp['COD_PRODUTO'] = [x[0] for x in codigos_desc]
             temp['DESC_PRODUTO'] = [x[1] for x in codigos_desc]
-            lista_status.append(temp[['UF_LIMPA', 'STATUS_LIMPO', 'MUNICIPIO_LIMPO', 'COD_PRODUTO', 'DESC_PRODUTO']])
+            
+            # ADICIONA A COLUNA NO RESULTADO FINAL
+            lista_status.append(temp[['UF_LIMPA', 'STATUS_LIMPO', 'MUNICIPIO_LIMPO', 'COD_PRODUTO', 'DESC_PRODUTO', 'DATA_CADASTRO']])
 
         if df_novos is not None:
             c_org = achar_coluna(df_novos, ['ENTIDADE', 'ORGAO'])
             c_st = achar_coluna(df_novos, ['STATUS'])
+            c_data_novos = achar_coluna(df_novos, ['DATA CADASTRO', 'DATA_CADASTRO', 'CRIADO EM', 'DATA', 'DATA DE CADASTRO'])
+            
             if c_org and c_st:
                 t2 = df_novos.copy()
                 t2['UF_LIMPA'] = t2[c_org].astype(str).str.extract(r'/([A-Z]{2})')
@@ -278,7 +273,11 @@ def processar_gestao(PLANILHAS):
                 t2['MUNICIPIO_LIMPO'] = "NAO INFORMADO"
                 t2['COD_PRODUTO'] = "NOVO"
                 t2['DESC_PRODUTO'] = "Novo Produto Cadastrado"
-                lista_status.append(t2.dropna(subset=['UF_LIMPA'])[['UF_LIMPA', 'STATUS_LIMPO', 'MUNICIPIO_LIMPO', 'COD_PRODUTO', 'DESC_PRODUTO']])
+                
+                # DATA DE CADASTRO DOS PRODUTOS NOVOS
+                t2['DATA_CADASTRO'] = t2[c_data_novos] if c_data_novos else None
+                
+                lista_status.append(t2.dropna(subset=['UF_LIMPA'])[['UF_LIMPA', 'STATUS_LIMPO', 'MUNICIPIO_LIMPO', 'COD_PRODUTO', 'DESC_PRODUTO', 'DATA_CADASTRO']])
 
         if lista_status:
             df_full = pd.concat(lista_status)
@@ -308,7 +307,7 @@ def processar_gestao(PLANILHAS):
             c_esf = achar_coluna(df_org, ['ESFERA'])
             df_org['ESFERA_LIMPA'] = df_org[c_esf].apply(limpar_esfera) if c_esf else "NAO IDENTIFICADO"
 
-    # Salvando Gestão
+    # Salvando Gestão no BD
     salvar_tabela_segura(dfs.get('users'), 'usuarios')
     if df_org is not None:
         cols = [c for c in df_org.columns if c != 'CHAVE']
@@ -318,6 +317,10 @@ def processar_gestao(PLANILHAS):
     salvar_tabela_segura(df_stats_status, 'stats_status_uf')
     salvar_tabela_segura(df_top_produtos, 'stats_produtos')
     salvar_tabela_segura(df_top_mun, 'stats_municipios')
+    
+    # NOVO: Salva a tabela completa com as Datas para uso na Análise Temporal!
+    if not df_full.empty:
+        salvar_tabela_segura(df_full, 'produtos_completo')
     
     print("  ✓ Dados de Gestão salvos.")
 

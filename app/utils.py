@@ -66,7 +66,7 @@ def padronizar_grafico(fig, tema):
 def carregar_dados_gerais():
     """
     Carrega dados de gestão do Banco de Dados.
-    Busca especificamente a tabela 'produtos_resultados' para o df_raw.
+    Busca a tabela 'produtos_completo' atualizada com as datas para o df_raw.
     """
     try:
         engine = create_engine('mysql+pymysql://root:Jjjb3509@127.0.0.1:3306/db_pnatrans')
@@ -86,16 +86,12 @@ def carregar_dados_gerais():
             except: df_mun = pd.DataFrame()
 
             # 2. Tabela Bruta de Produtos (Para gráficos temporais e comparativos)
-            # Tenta ler 'produtos_resultados' conforme solicitado
+            # Lê 'produtos_completo' gerada pelo nosso ETL
             df_raw = pd.DataFrame()
             try:
-                df_raw = pd.read_sql("SELECT * FROM produtos_resultados", conn)
+                df_raw = pd.read_sql("SELECT * FROM produtos_completo", conn)
             except Exception as e:
-                # Se falhar, tenta 'produtos' como fallback
-                try:
-                    df_raw = pd.read_sql("SELECT * FROM produtos", conn)
-                except:
-                    print(f"Aviso: Tabela de produtos brutos ('produtos_resultados') não encontrada: {e}")
+                print(f"Aviso: Tabela de produtos brutos ('produtos_completo') não encontrada: {e}")
             
             return df_mapa, df_org.fillna("-"), df_prod.fillna(0), df_status.fillna(0), df_users.fillna("-"), df_raw, df_mun
             

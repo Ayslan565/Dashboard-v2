@@ -46,7 +46,9 @@ def limpar_header(col):
     }
     
     for k, v in mapa_meses.items():
-        if c.startswith(k): return v
+        # CORREÇÃO: Verifica de forma mais restrita para não confundir 'abr' de abrangencia com abril
+        if c == k or c == v or c.startswith(f"{k}_") or c.startswith(f"{k}-") or c.startswith(f"{k}/"):
+            return v
         
     return c
 

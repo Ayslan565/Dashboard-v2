@@ -152,8 +152,9 @@ elif pagina == "🏥 Óbitos (DATASUS)":
 
 elif pagina == "⚖️ Comparativo Geral":
     # Carrega dados necessários para o cruzamento de informações
-    df_obitos = carregar_dados_obitos()
+    # Precisamos da base de sinistros da PRF, não dos óbitos DATASUS
+    df_prf = carregar_dados_prf()
     
     # ATENÇÃO: Passamos df_raw (tabela bruta de produtos) em vez de df_prod
     # df_raw contém as colunas de data/ano necessárias para o eixo X do gráfico
-    comparativo.render_comparativo(df_raw, df_obitos, cfg)
+    comparativo.render_comparativo(df_raw, df_prf, cfg)
